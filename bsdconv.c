@@ -1,10 +1,16 @@
 #include <ruby.h>
 #include <bsdconv.h>
 
+struct bsdconv_wrap{
+	struct bsdconv_instance *ins;
+};
+
 #define IBUFLEN 1024
 
+static void bsdconv_wrap_destroy(struct bsdconv_wrap*);
 void Init_bsdconv();
-static VALUE m_new(VALUE, VALUE);
+static VALUE m_allocate(VALUE);
+static VALUE m_initialize(VALUE, VALUE);
 static VALUE m_insert_phase(VALUE, VALUE, VALUE, VALUE);
 static VALUE m_insert_codec(VALUE, VALUE, VALUE, VALUE);
 static VALUE m_replace_phase(VALUE, VALUE, VALUE, VALUE);
@@ -22,9 +28,16 @@ static VALUE f_error(VALUE);
 static VALUE f_codecs_list(VALUE, VALUE);
 static VALUE f_codec_check(VALUE, VALUE, VALUE);
 
+static void bsdconv_wrap_destroy(struct bsdconv_wrap *wrap){
+	if(wrap->ins)
+		bsdconv_destroy(wrap->ins);
+	free(wrap);
+}
+
 void Init_bsdconv(){
 	VALUE Bsdconv = rb_define_class("Bsdconv", rb_cObject);
-	rb_define_singleton_method(Bsdconv, "new", m_new, 1);
+	rb_define_alloc_func(Bsdconv, m_allocate);
+	rb_define_method(Bsdconv, "initialize", m_initialize, 1);
 	rb_define_method(Bsdconv, "insert_phase", m_insert_phase, 3);
 	rb_define_method(Bsdconv, "insert_codec", m_insert_codec, 3);
 	rb_define_method(Bsdconv, "replace_phase", m_replace_phase, 3);
@@ -46,7 +59,14 @@ void Init_bsdconv(){
 	rb_define_singleton_method(Bsdconv, "codec_check", f_codec_check, 2);
 }
 
-static VALUE m_new(VALUE class, VALUE conversion){
+static VALUE m_allocate(VALUE class){
+	struct bsdconv_wrap *wrap = malloc(sizeof(struct bsdconv_wrap));
+	wrap->ins=NULL;
+	return Data_Wrap_Struct(class, 0, bsdconv_wrap_destroy, wrap);
+}
+
+static VALUE m_initialize(VALUE self, VALUE conversion){
+	struct bsdconv_wrap *wrap;
 	struct bsdconv_instance *ins;
 	if(TYPE(conversion)!=T_STRING)
 		ins=bsdconv_create("");
@@ -54,37 +74,41 @@ static VALUE m_new(VALUE class, VALUE conversion){
 		ins=bsdconv_create(RSTRING_PTR(conversion));
 	if(ins==NULL)
 		return Qnil;
-	return Data_Wrap_Struct(class, 0, bsdconv_destroy, ins);
+	Data_Get_Struct(self, struct bsdconv_wrap, wrap);
+	wrap->ins = ins;
+	return self;
 }
 
 static VALUE m_insert_phase(VALUE self, VALUE conversion, VALUE phase_type, VALUE phasen){
-	struct bsdconv_instance *ins;
-	Data_Get_Struct(self, struct bsdconv_instance, ins);
-	return INT2NUM(bsdconv_insert_phase(ins, RSTRING_PTR(conversion), NUM2INT(phase_type), NUM2INT(phasen)));
+	struct bsdconv_wrap *wrap;
+	Data_Get_Struct(self, struct bsdconv_wrap, wrap);
+	return INT2NUM(bsdconv_insert_phase(wrap->ins, RSTRING_PTR(conversion), NUM2INT(phase_type), NUM2INT(phasen)));
 }
 
 static VALUE m_insert_codec(VALUE self, VALUE conversion, VALUE phasen, VALUE codecn){
-	struct bsdconv_instance *ins;
-	Data_Get_Struct(self, struct bsdconv_instance, ins);
-	return INT2NUM(bsdconv_insert_phase(ins, RSTRING_PTR(conversion), NUM2INT(phasen), NUM2INT(codecn)));
+	struct bsdconv_wrap *wrap;
+	Data_Get_Struct(self, struct bsdconv_wrap, wrap);
+	return INT2NUM(bsdconv_insert_phase(wrap->ins, RSTRING_PTR(conversion), NUM2INT(phasen), NUM2INT(codecn)));
 }
 
 static VALUE m_replace_phase(VALUE self, VALUE conversion, VALUE phase_type, VALUE phasen){
-	struct bsdconv_instance *ins;
-	Data_Get_Struct(self, struct bsdconv_instance, ins);
-	return INT2NUM(bsdconv_insert_phase(ins, RSTRING_PTR(conversion), NUM2INT(phase_type), NUM2INT(phasen)));
+	struct bsdconv_wrap *wrap;
+	Data_Get_Struct(self, struct bsdconv_wrap, wrap);
+	return INT2NUM(bsdconv_insert_phase(wrap->ins, RSTRING_PTR(conversion), NUM2INT(phase_type), NUM2INT(phasen)));
 }
 
 static VALUE m_replace_codec(VALUE self, VALUE conversion, VALUE phasen, VALUE codecn){
-	struct bsdconv_instance *ins;
-	Data_Get_Struct(self, struct bsdconv_instance, ins);
-	return INT2NUM(bsdconv_insert_phase(ins, RSTRING_PTR(conversion), NUM2INT(phasen), NUM2INT(codecn)));
+	struct bsdconv_wrap *wrap;
+	Data_Get_Struct(self, struct bsdconv_wrap, wrap);
+	return INT2NUM(bsdconv_insert_phase(wrap->ins, RSTRING_PTR(conversion), NUM2INT(phasen), NUM2INT(codecn)));
 }
 
 static VALUE m_conv(VALUE self, VALUE str){
 	VALUE ret;
+	struct bsdconv_wrap *wrap;
 	struct bsdconv_instance *ins;
-	Data_Get_Struct(self, struct bsdconv_instance, ins);
+	Data_Get_Struct(self, struct bsdconv_wrap, wrap);
+	ins=wrap->ins;
 	bsdconv_init(ins);
 	ins->output_mode=BSDCONV_AUTOMALLOC;
 	ins->input.data=RSTRING_PTR(str);
@@ -98,16 +122,18 @@ static VALUE m_conv(VALUE self, VALUE str){
 }
 
 static VALUE m_init(VALUE self){
-	struct bsdconv_instance *ins;
-	Data_Get_Struct(self, struct bsdconv_instance, ins);
-	bsdconv_init(ins);
+	struct bsdconv_wrap *wrap;
+	Data_Get_Struct(self, struct bsdconv_wrap, wrap);
+	bsdconv_init(wrap->ins);
 	return Qtrue;
 }
 
 static VALUE m_conv_chunk(VALUE self, VALUE str){
 	VALUE ret;
+	struct bsdconv_wrap *wrap;
 	struct bsdconv_instance *ins;
-	Data_Get_Struct(self, struct bsdconv_instance, ins);
+	Data_Get_Struct(self, struct bsdconv_wrap, wrap);
+	ins=wrap->ins;
 	ins->output_mode=BSDCONV_AUTOMALLOC;
 	ins->input.data=RSTRING_PTR(str);
 	ins->input.len=RSTRING_LEN(str);
@@ -120,8 +146,10 @@ static VALUE m_conv_chunk(VALUE self, VALUE str){
 
 static VALUE m_conv_chunk_last(VALUE self, VALUE str){
 	VALUE ret;
+	struct bsdconv_wrap *wrap;
 	struct bsdconv_instance *ins;
-	Data_Get_Struct(self, struct bsdconv_instance, ins);
+	Data_Get_Struct(self, struct bsdconv_wrap, wrap);
+	ins=wrap->ins;
 	ins->output_mode=BSDCONV_AUTOMALLOC;
 	ins->input.data=RSTRING_PTR(str);
 	ins->input.len=RSTRING_LEN(str);
@@ -133,6 +161,7 @@ static VALUE m_conv_chunk_last(VALUE self, VALUE str){
 }
 
 static VALUE m_conv_file(VALUE self, VALUE ifile, VALUE ofile){
+	struct bsdconv_wrap *wrap;
 	struct bsdconv_instance *ins;
 	FILE *inf, *otf;
 	char *s1=RSTRING_PTR(ifile);
@@ -141,7 +170,8 @@ static VALUE m_conv_file(VALUE self, VALUE ifile, VALUE ofile){
 	char *tmp;
 	int fd;
 
-	Data_Get_Struct(self, struct bsdconv_instance, ins);
+	Data_Get_Struct(self, struct bsdconv_wrap, wrap);
+	ins=wrap->ins;
 	inf=fopen(s1,"r");
 	if(!inf){
 		return Qfalse;
@@ -184,8 +214,10 @@ static VALUE m_conv_file(VALUE self, VALUE ifile, VALUE ofile){
 
 static VALUE m_info(VALUE self){
 	VALUE ret;
+	struct bsdconv_wrap *wrap;
 	struct bsdconv_instance *ins;
 	Data_Get_Struct(self, struct bsdconv_instance, ins);
+	ins=wrap->ins;
 	ret=rb_hash_new();
 	rb_hash_aset(ret, rb_str_new2("ierr"), INT2FIX(ins->ierr));
 	rb_hash_aset(ret, rb_str_new2("oerr"), INT2FIX(ins->oerr));
@@ -196,11 +228,13 @@ static VALUE m_info(VALUE self){
 static VALUE m_inspect(VALUE self){
 #define TEMPLATE "Bsdconv.new(\"%s\")"
 	VALUE ret;
+	struct bsdconv_wrap *wrap;
 	struct bsdconv_instance *ins;
 	char *s;
 	char *s2;
 	int len=sizeof(TEMPLATE);
-	Data_Get_Struct(self, struct bsdconv_instance, ins);
+	Data_Get_Struct(self, struct bsdconv_wrap, wrap);
+	ins=wrap->ins;
 	s=bsdconv_pack(ins);
 	len+=strlen(s);
 	s2=malloc(len);
